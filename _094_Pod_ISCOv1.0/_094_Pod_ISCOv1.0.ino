@@ -1,5 +1,13 @@
 
-/*This code was written to work with the 094 sensor pod.
+/* * Teensy 3.5 Custom PCB developed to automate ISCO 6700 Sampling with a digital output pin
+ * Unit is controlled via SMS commands
+ * Bottle number and time sampled is parsed from ISCO Serial Output
+ * Data including bottle number, water level and fixed GPS coordinates are streamed to VIPER database using HTTP Post from a FONA 808 cellular module
+ * Time, bottle number and water level are saved to SD card locally
+ * Water level (presence) is detected by an optical sensor (Optomax Digital Liquid Level Sensor)
+ * Auto Sampling Mode - Pulses pin every 5 minutes when water is present in the collection basin
+ * Grab Sampling Mode - Pulses pin whenever a grab sample is initiated by SMS command - if water is in the collection basin
+
 
   Tim McArthur
 
