@@ -5,8 +5,8 @@
  * Data including bottle number, water level and fixed GPS coordinates are streamed to VIPER database using HTTP Post from a FONA 808 cellular module
  * Time, bottle number and water level are saved to SD card locally
  * Water level (presence) is detected by an optical sensor (Optomax Digital Liquid Level Sensor)
- * Auto Sampling Mode - Pulses pin every 5 minutes when water is present in the collection basin
- * Grab Sampling Mode - Pulses pin whenever a grab sample is initiated by SMS command - if water is in the collection basin
+ * Auto Sampling Mode - Pulses pin every (grabSampleInterval) minutes when water is present in the collection basin
+ * Grab Sampling Mode - Pulses pin whenever a grab sample is initiated by SMS command
 
 
   Tim McArthur
@@ -18,14 +18,15 @@
 //             - Default starts in grab mode
 //             - Grab sample ignores water level. Still depends on ISCO being enabled
 //Version 1.02 - Change auto sampling interval via text message
-//Version 1.03 - Saving sampling mode and interval to EEPROM to hold on restart - Writing more information to SD card
+//Version 1.03 - Saving sampling mode and interval to EEPROM to hold on restart - 4/25/2018 - Tim McArthur
+//             - Writing more information to SD card
 
 
 
 //GPS and unit values iused in VIPER Post
 
-char GPS[] = "40.5087450 ,-74.3580650 0"; //needs a (space 0) at the end, example ="35.068471,-89.944730 0"
-int unit = 2;
+char GPS[] = "40.5087450, -74.3580650 0"; //needs a (space 0) at the end, example ="35.068471,-89.944730 0"
+int unit = 6;
 char versionNum[] = "_094_Pod_ISCOv1.03";
 
 //////////////////////////////////
@@ -58,7 +59,7 @@ char levelChar[10];
 char bVChar[10];
 
 ///////////////////////////////////////
-//Static numbers to text when bottles are full
+//Static numbers to text when bottles are full and accept SMS comands from:
 char* timsPhone = "+19199204318";
 //Numbers to accept SMS commands from:
 char* annesPhone1 = "+19198860812";
@@ -66,7 +67,7 @@ char* annesPhone2 = "+15179451531";
 char* katherinesPhone = "+16157148918";
 char* worthsPhone = "+19194233837";
 char* googlePhone = "+19192301472";
-bool successTimText = false; //logic to control when to text
+bool successTimText = false; //logic to control when to text bottle full message
 int readSMSSuccess = 0;
 int deleteSMSSuccess = 0;
 ////////////////////////////////////////////////
@@ -152,9 +153,9 @@ unsigned long iscoTimeout = millis();
 
 ///////////////////////////RELAYS
 bool RQ30 = true;
-#define HPRelay 27
-#define RQ30Relay 26
-unsigned long fonaTimer = millis();
+#define HPRelay 27 //Outpin PIN to control HydraProbe 12V Rail
+#define RQ30Relay 26 //Output PIN to control RQ30 12V Rail
+unsigned long fonaTimer = millis(); //timer to reset Fona
 int resetFona = 60; //reset Fona every X minutes
 //////////////////////////RELAYS
 
@@ -213,8 +214,8 @@ void setup() {
 
   }
   Watchdog.reset();
-  EEPROM.get(eepromModeAddr, grabSampleMode);
-  EEPROM.get(eepromIntervalAddr, grabSampleInterval);
+  EEPROM.get(eepromModeAddr, grabSampleMode); //Get Sampling mode from EEPROM
+  EEPROM.get(eepromIntervalAddr, grabSampleInterval); //Get sampleInterval from EEPROM
   Serial.print("Interval is ");Serial.print(grabSampleInterval);Serial.println("minutes");
   GPRSSerial->begin(19200);  //Startup HTTP post client
   if (! client.init(*GPRSSerial)) {
@@ -261,7 +262,7 @@ void loop() {
     Serial.print("Started waiting for ISCO...Millis = "); Serial.println(millis()); //If ISCO is enabled, reset the watchdog while waiting for data on ISCO Serial
     do {
       Watchdog.reset();
-    } while (iscoSerial.available() == 0 && millis() - iscoTimeout < 40000);
+    } while (iscoSerial.available() == 0 && millis() - iscoTimeout < 40000); //If there is data on the serial line, OR its been 40 seconds, continue
     iscoTimeout = millis(); //reset timer
     Serial.print("Finished waiting for ISCO...Millis = "); Serial.println(millis());
     do {  //read in data from ISCO Serial
@@ -290,9 +291,9 @@ void loop() {
 
   if (millis() - fonaTimer > resetFona * 60000) //Reset fona every (resetFona) minutes
   {
-    toggleFona();
+    toggleFona(); //turn off Fona
     delay(5000);
-    toggleFona();
+    toggleFona(); //turn on Fona
     fonaTimer = millis(); //reset timer
   } else
   {
@@ -387,6 +388,7 @@ void checkTexts() //reads SMS(s) off the Fona buffer to check for commands
         readSMSSuccess = readSMS(x);                              
         ++x;
         Serial.print("Success ="); Serial.println(readSMSSuccess);
+        ++tries;
       } while (readSMSSuccess == 0  && tries < 30);  
 
 
@@ -462,8 +464,8 @@ void checkTexts() //reads SMS(s) off the Fona buffer to check for commands
       grabSampleInterval = atoi(replybuffer_interval);
       Serial.print("Changed grab sample interval to ");Serial.print(grabSampleInterval);Serial.println(" minutes");
       Serial.print("Writing ");Serial.print(grabSampleInterval);Serial.print(" to EEPROM address");Serial.println(eepromIntervalAddr);
-       EEPROM.put(eepromIntervalAddr, grabSampleInterval);
-      sprintf(Message, "%s%i%s", "Changed AUTO Sample Interval \n to ", grabSampleInterval," mins");
+       EEPROM.put(eepromIntervalAddr, grabSampleInterval); //Write new interval to EEPROM
+      sprintf(Message, "%s%i%s", "Changed AUTO Sample Interval \n to ", grabSampleInterval," mins"); //Notify SMS User
       sendSMS(senderNum, Message);
     }
     if (commandNum == 0) //Default message to send back if a command is not received.
@@ -560,7 +562,7 @@ int readSMS(int8_t number) { //read the SMS into the replybuffer and parse the c
 
   int y = sprintf(senderNum, "%s", replybuffer);
   Serial.print("Sender is ");
-  Serial.println(senderNum);
+  Serial.println(senderNum);  //check sender's number against list of accepted users...
 
    if (strcmp(senderNum, timsPhone) == 0)
   {
@@ -586,7 +588,7 @@ int readSMS(int8_t number) { //read the SMS into the replybuffer and parse the c
   {
     respond = true;
   }
-  if (respond)
+  if (respond) //if the number is recognized, process the SMS and command
   {
     Serial.println("Accepted number");
   // Retrieve SMS value.
@@ -866,7 +868,7 @@ int getBottleNumber() //parse the bottle Number from ISCO input
     }
     if (commaNumber1 == 10)
     {
-      int y = sprintf(bottleNumChar, "%c%c%c", iscoData[x + 2], iscoData[x + 3], iscoData[x + 4]);
+      int y = sprintf(bottleNumChar, "%c%c", iscoData[x + 2], iscoData[x + 3]);
       bottleNumber = atoi(bottleNumChar);
       Serial.print("Next four characters are"); Serial.print(iscoData[x + 1]); Serial.print(iscoData[x + 2]); Serial.print(iscoData[x + 3]); Serial.println(iscoData[x + 4]);
       Serial.print("Bottle Number is ");
@@ -980,9 +982,11 @@ void postData() //post Data to VIPER
     if (getWaterLevel()) //Transpose the water level to 50 (wet) or 0 (dry) for viewing on VIPER
     {
       intWL = 50;
+      levelReading = 50;
     } else
     {
       intWL = 0;
+      levelReading = 0;
     }
     //client.addFloat("moisture1", moisture * 100, "%");
     //client.addFloat("moisture2", moisture2 * 100, "%");
@@ -1209,8 +1213,8 @@ bool getWaterLevel()
   for (int x = 0 ; x < 50 ; ++x)
   {
     reading = analogRead(levelPin);
-    Serial.print("Reading --- ");
-    Serial.println(reading);
+    //Serial.print("Reading --- ");
+    //Serial.println(reading);
     if (reading > 100)
     {
       ++over;
